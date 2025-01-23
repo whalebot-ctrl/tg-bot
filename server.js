@@ -29,93 +29,172 @@ const initializeBot = async () => {
   }
 };
 
+// Cache to store CoinGecko data
+const cache = {};
+
 // Function to fetch gainers and losers from CoinGecko
 const fetchAndUpdate = async () => {
   try {
     console.log('Fetching top gainers and losers from CoinGecko...');
     const url = 'https://api.coingecko.com/api/v3/coins/markets';
-    const response = await axios.get(url, {
-      params: {
+    const cacheKey = 'coingecko-data';
+    if (cache[cacheKey] && cache[cacheKey].expires > Date.now()) {
+      console.log('Using cached data...');
+      const data = cache[cacheKey].data;
+      // Process the cached data
+      const sortedCoins = [...data].sort(
+        (a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h
+      );
+
+      // Top 10 gainers
+      const topGainers = sortedCoins.slice(0, 10).map((coin, index) => {
+        return `${index + 1}. **${
+          coin.name
+        }** (${coin.symbol.toUpperCase()})\n   🟢 **+${coin.price_change_percentage_24h.toFixed(
+          2
+        )}%** ↑ - $${coin.current_price}`;
+      });
+
+      // Top 10 losers
+      const topLosers = sortedCoins
+        .slice(-10)
+        .reverse()
+        .map((coin, index) => {
+          return `${index + 1}. **${
+            coin.name
+          }** (${coin.symbol.toUpperCase()})\n   🔴 **${coin.price_change_percentage_24h.toFixed(
+            2
+          )}%** ↓ - $${coin.current_price}`;
+        });
+
+      // Send gainers to Telegram
+      const gainersMessage = `
+📈 **Top 10 Gagnants (24h):**
+${topGainers.join('\n\n')}
+    `;
+      console.log('Sending gainers message to Telegram group...');
+      await bot.telegram.sendMessage(
+        process.env.TELEGRAM_GROUP_ID,
+        gainersMessage,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            Markup.button.url(
+              'Voir le graphique complet',
+              'https://www.coingecko.com/fr/coins/trending'
+            ),
+          ]),
+        }
+      );
+      console.log('Gainers message sent successfully.');
+
+      // Send losers to Telegram
+      const losersMessage = `
+📉 **Top 10 Perdants (24h):**
+${topLosers.join('\n\n')}
+    `;
+      console.log('Sending losers message to Telegram group...');
+      await bot.telegram.sendMessage(
+        process.env.TELEGRAM_GROUP_ID,
+        losersMessage,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            Markup.button.url(
+              'Voir le graphique complet',
+              'https://www.coingecko.com/fr/coins/trending'
+            ),
+          ]),
+        }
+      );
+      console.log('Losers message sent successfully.');
+    } else {
+      const params = {
         vs_currency: 'usd',
         order: 'market_cap_desc',
         per_page: 250, // Max number of coins per page
         page: 1,
         price_change_percentage: '24h',
-      },
-    });
+      };
+      const response = await axios.get(url, {
+        params,
+      });
+      if (!response.data || response.data.length === 0) {
+        console.error('Error: No data received from CoinGecko.');
+        return;
+      }
+      cache[cacheKey] = {
+        data: response.data,
+        expires: Date.now() + 10 * 60 * 1000, // Cache for 10 minutes
+      };
+      // Process the data
+      const sortedCoins = [...response.data].sort(
+        (a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h
+      );
 
-    if (!response.data || response.data.length === 0) {
-      console.error('Error: No data received from CoinGecko.');
-      return;
-    }
-
-    // Sort by price change percentage (24h)
-    const sortedCoins = [...response.data].sort(
-      (a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h
-    );
-
-    // Top 10 gainers
-    const topGainers = sortedCoins.slice(0, 10).map((coin, index) => {
-      return `${index + 1}. **${
-        coin.name
-      }** (${coin.symbol.toUpperCase()})\n   🟢 **+${coin.price_change_percentage_24h.toFixed(
-        2
-      )}%** ↑ - $${coin.current_price}`;
-    });
-
-    // Top 10 losers
-    const topLosers = sortedCoins
-      .slice(-10)
-      .reverse()
-      .map((coin, index) => {
+      // Top 10 gainers
+      const topGainers = sortedCoins.slice(0, 10).map((coin, index) => {
         return `${index + 1}. **${
           coin.name
-        }** (${coin.symbol.toUpperCase()})\n   🔴 **${coin.price_change_percentage_24h.toFixed(
+        }** (${coin.symbol.toUpperCase()})\n   🟢 **+${coin.price_change_percentage_24h.toFixed(
           2
-        )}%** ↓ - $${coin.current_price}`;
+        )}%** ↑ - $${coin.current_price}`;
       });
 
-    // Send gainers to Telegram
-    const gainersMessage = `
+      // Top 10 losers
+      const topLosers = sortedCoins
+        .slice(-10)
+        .reverse()
+        .map((coin, index) => {
+          return `${index + 1}. **${
+            coin.name
+          }** (${coin.symbol.toUpperCase()})\n   🔴 **${coin.price_change_percentage_24h.toFixed(
+            2
+          )}%** ↓ - $${coin.current_price}`;
+        });
+
+      // Send gainers to Telegram
+      const gainersMessage = `
 📈 **Top 10 Gagnants (24h):**
 ${topGainers.join('\n\n')}
     `;
-    console.log('Sending gainers message to Telegram group...');
-    await bot.telegram.sendMessage(
-      process.env.TELEGRAM_GROUP_ID,
-      gainersMessage,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          Markup.button.url(
-            'Voir le graphique complet',
-            'https://www.coingecko.com/fr/coins/trending'
-          ),
-        ]),
-      }
-    );
-    console.log('Gainers message sent successfully.');
+      console.log('Sending gainers message to Telegram group...');
+      await bot.telegram.sendMessage(
+        process.env.TELEGRAM_GROUP_ID,
+        gainersMessage,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            Markup.button.url(
+              'Voir le graphique complet',
+              'https://www.coingecko.com/fr/coins/trending'
+            ),
+          ]),
+        }
+      );
+      console.log('Gainers message sent successfully.');
 
-    // Send losers to Telegram
-    const losersMessage = `
+      // Send losers to Telegram
+      const losersMessage = `
 📉 **Top 10 Perdants (24h):**
 ${topLosers.join('\n\n')}
     `;
-    console.log('Sending losers message to Telegram group...');
-    await bot.telegram.sendMessage(
-      process.env.TELEGRAM_GROUP_ID,
-      losersMessage,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          Markup.button.url(
-            'Voir le graphique complet',
-            'https://www.coingecko.com/fr/coins/trending'
-          ),
-        ]),
-      }
-    );
-    console.log('Losers message sent successfully.');
+      console.log('Sending losers message to Telegram group...');
+      await bot.telegram.sendMessage(
+        process.env.TELEGRAM_GROUP_ID,
+        losersMessage,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            Markup.button.url(
+              'Voir le graphique complet',
+              'https://www.coingecko.com/fr/coins/trending'
+            ),
+          ]),
+        }
+      );
+      console.log('Losers message sent successfully.');
+    }
   } catch (error) {
     console.error('Error fetching data from CoinGecko:', error.message);
     if (error.response) {
