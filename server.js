@@ -131,13 +131,7 @@ setInterval(fetchAndUpdate, 600000);
 // Launch the bot
 initializeBot()
   .then(() => {
-    bot
-      .launch()
-      .then(() => console.log('Bot is running...'))
-      .catch((err) => {
-        console.error('Error launching bot:', err.message);
-        process.exit(1);
-      });
+    console.log('Bot is running...');
   })
   .catch((err) => {
     console.error('Error initializing bot:', err.message);
