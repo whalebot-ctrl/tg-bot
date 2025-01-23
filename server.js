@@ -17,10 +17,15 @@ const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 // Function to delete any existing webhook
 const initializeBot = async () => {
   try {
-    await bot.telegram.deleteWebhook();
-    console.log('Webhook deleted, running bot in polling mode...');
+    await bot.startWebhook({
+      url: 'https://tg-bot-y1pe.onrender.com',
+      webhookHandler: (req, res) => {
+        bot.handleUpdate(req.body, res);
+      },
+    });
+    console.log('Webhook set up successfully...');
   } catch (error) {
-    console.error('Error deleting webhook:', error.message);
+    console.error('Error setting up webhook:', error.message);
   }
 };
 
