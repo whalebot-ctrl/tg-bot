@@ -1,82 +1,118 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import axios from 'axios';
 
 // Validate environment variables
 const requiredEnvVars = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_GROUP_ID'];
-for (const varName of requiredEnvVars) {
+requiredEnvVars.forEach((varName) => {
   if (!process.env[varName]) {
     console.error(`Error: Missing ${varName} in environment variables.`);
     process.exit(1);
   }
-}
+});
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-// Function to fetch price data and send it to the group
+// Function to delete any existing webhook
+const initializeBot = async () => {
+  try {
+    await bot.telegram.deleteWebhook();
+    console.log('Webhook deleted, running bot in polling mode...');
+  } catch (error) {
+    console.error('Error deleting webhook:', error.message);
+  }
+};
+
+// Function to fetch gainers and losers from CoinGecko
 const fetchAndUpdate = async () => {
   try {
-    console.log('Fetching price data...');
-
-    const url = `https://api.dexscreener.com/latest/dex/pairs/base/0xe428beea229e96664b0e1ec20ffb619e818b390c`;
-    console.log(`API URL: ${url}`);
-
-    // Send a GET request to the API
+    console.log('Fetching top gainers and losers from CoinGecko...');
+    const url = 'https://api.coingecko.com/api/v3/coins/markets';
     const response = await axios.get(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      params: {
+        vs_currency: 'usd',
+        order: 'market_cap_desc',
+        per_page: 250, // Max number of coins per page
+        page: 1,
+        price_change_percentage: '24h',
       },
     });
 
-    console.log('API response received.');
-
-    if (!response.data || !response.data.pair) {
-      console.error('Error: Missing expected data in API response.');
+    if (!response.data || response.data.length === 0) {
+      console.error('Error: No data received from CoinGecko.');
       return;
     }
 
-    const rwaData = response.data.pair;
-    console.log('Data extracted from API response:', rwaData);
+    // Sort by price change percentage (24h)
+    const sortedCoins = [...response.data].sort(
+      (a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h
+    );
 
-    const {
-      priceNative = 'N/A',
-      priceUsd = 'N/A',
-      volume = {},
-      priceChange = {},
-      liquidity = {},
-      fdv = 'N/A',
-      marketCap = 'N/A',
-      pairCreatedAt = 'N/A',
-      info = {},
-    } = rwaData;
-
-    // Prepare the message
-    const message = `
-📊 **RWA Price Update**
-- 💰 **Price (Native):** ${priceNative}
-- 💵 **Price (USD):** $${priceUsd}
-- 📈 **Volume (24h):** $${volume.h24 || 'N/A'}
-- 🔄 **Price Change (24h):** ${priceChange.h24 || 'N/A'}%
-- 💧 **Liquidity (USD):** $${liquidity.usd || 'N/A'}
-- 🌟 **FDV:** $${fdv}
-- 🌍 **Market Cap:** $${marketCap}
-- 📅 **Pair Created At:** ${
-      pairCreatedAt !== 'N/A' ? new Date(pairCreatedAt).toLocaleString() : 'N/A'
-    }
-- 🖼️ **Chart:** [View Chart](${info.openGraph || '#'})
-- 🧾 [View TX](https://basescan.org/tx/0x222d885b16d60d94c170097b47be9d7917de3fc02c717fef03aefeb4917697c3)
-- 🔗 **RWA on CMC:** [CoinMarketCap](https://coinmarketcap.com/currencies/rwa-inc/)
-    `;
-
-    console.log('Sending message to Telegram group...');
-    await bot.telegram.sendMessage(process.env.TELEGRAM_GROUP_ID, message, {
-      parse_mode: 'Markdown',
+    // Top 10 gainers
+    const topGainers = sortedCoins.slice(0, 10).map((coin, index) => {
+      return `${index + 1}. **${
+        coin.name
+      }** (${coin.symbol.toUpperCase()})\n   🟢 **+${coin.price_change_percentage_24h.toFixed(
+        2
+      )}%** ↑ - $${coin.current_price}`;
     });
-    console.log('Message sent successfully.');
+
+    // Top 10 losers
+    const topLosers = sortedCoins
+      .slice(-10)
+      .reverse()
+      .map((coin, index) => {
+        return `${index + 1}. **${
+          coin.name
+        }** (${coin.symbol.toUpperCase()})\n   🔴 **${coin.price_change_percentage_24h.toFixed(
+          2
+        )}%** ↓ - $${coin.current_price}`;
+      });
+
+    // Send gainers to Telegram
+    const gainersMessage = `
+📈 **Top 10 Gagnants (24h):**
+${topGainers.join('\n\n')}
+    `;
+    console.log('Sending gainers message to Telegram group...');
+    await bot.telegram.sendMessage(
+      process.env.TELEGRAM_GROUP_ID,
+      gainersMessage,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          Markup.button.url(
+            'Voir le graphique complet',
+            'https://www.coingecko.com/fr/coins/trending'
+          ),
+        ]),
+      }
+    );
+    console.log('Gainers message sent successfully.');
+
+    // Send losers to Telegram
+    const losersMessage = `
+📉 **Top 10 Perdants (24h):**
+${topLosers.join('\n\n')}
+    `;
+    console.log('Sending losers message to Telegram group...');
+    await bot.telegram.sendMessage(
+      process.env.TELEGRAM_GROUP_ID,
+      losersMessage,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          Markup.button.url(
+            'Voir le graphique complet',
+            'https://www.coingecko.com/fr/coins/trending'
+          ),
+        ]),
+      }
+    );
+    console.log('Losers message sent successfully.');
   } catch (error) {
-    console.error('Error fetching data:', error.message);
+    console.error('Error fetching data from CoinGecko:', error.message);
     if (error.response) {
       console.error('Response status:', error.response.status);
       console.error('Response data:', error.response.data);
@@ -84,27 +120,22 @@ const fetchAndUpdate = async () => {
   }
 };
 
-// Periodic updates
-setInterval(fetchAndUpdate, 40000);
-
-// /stake command handler
-bot.command('stake', async (ctx) => {
-  console.log('Received /stake command.');
-  const stakeMessage = `
-💼 **Stake RWA Tokens:**
-- 🚀 **RWA Inc. Launchpad:** [Stake here](https://example.com/launchpad)
-- 🌊 **Thena Pool:** [Stake here](https://example.com/thena-pool)
-  `;
-  await ctx.reply(stakeMessage, { parse_mode: 'Markdown' });
-  console.log('Stake message sent successfully.');
-});
+// Update every 10 minutes
+setInterval(fetchAndUpdate, 600000);
 
 // Launch the bot
-bot
-  .launch()
-  .then(() => console.log('Bot is running...'))
+initializeBot()
+  .then(() => {
+    bot
+      .launch()
+      .then(() => console.log('Bot is running...'))
+      .catch((err) => {
+        console.error('Error launching bot:', err.message);
+        process.exit(1);
+      });
+  })
   .catch((err) => {
-    console.error('Error launching bot:', err.message);
+    console.error('Error initializing bot:', err.message);
     process.exit(1);
   });
 
